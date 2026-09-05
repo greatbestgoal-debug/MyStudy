@@ -1,663 +1,509 @@
-// ===============================
-// SUPABASE
-// ===============================
-
-const SUPABASE_URL = "https://wdtpoljnlorbasitizcd.supabase.co";
-const SUPABASE_KEY = "sb_publishable_EHR9JrIbOkG-pWM3NNDPYA_hJfpyIXc";
-
-const supabaseClient = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
 
 
-// ===============================
+
 // ДАННЫЕ
-// ===============================
 
-let homeworkList = [];
-let trashHomework = [];
-
-let schedule = JSON.parse(localStorage.getItem("schedule")) || {};
+let homeworkList = JSON.parse(localStorage.getItem("homeworkList")) || [];
+let trashHomework = JSON.parse(localStorage.getItem("trashHomework")) || [];
 let trashLessons = JSON.parse(localStorage.getItem("trashLessons")) || [];
 
 
-// ===============================
-// АВТОРИЗАЦИЯ
-// ===============================
+// СОХРАНЕНИЕ
 
-async function register() {
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value;
-
-    const message = document.getElementById("authMessage");
-
-    if (!email || !password) {
-        message.textContent = "Введите Email и пароль.";
-        return;
-    }
-
-    try {
-        const { data, error } = await supabaseClient.auth.signUp({
-            email: email,
-            password: password
-        });
-
-        if (error) {
-            message.textContent = "Ошибка: " + error.message;
-            return;
-        }
-
-        if (data.user) {
-            message.textContent =
-                "Аккаунт создан. Теперь можно войти.";
-        }
-    } catch (error) {
-        console.error(error);
-        message.textContent = "Произошла ошибка.";
-    }
+function saveData() {
+    localStorage.setItem("homeworkList", JSON.stringify(homeworkList));
+    localStorage.setItem("trashHomework", JSON.stringify(trashHomework));
+    localStorage.setItem("trashLessons", JSON.stringify(trashLessons));
 }
 
 
-async function login() {
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value;
-
-    const message = document.getElementById("authMessage");
-
-    if (!email || !password) {
-        message.textContent = "Введите Email и пароль.";
-        return;
-    }
-
-    message.textContent = "Выполняется вход...";
-
-    try {
-        const { data, error } =
-            await supabaseClient.auth.signInWithPassword({
-                email: email,
-                password: password
-            });
-
-        if (error) {
-            console.error(error);
-            message.textContent = "Ошибка входа: " + error.message;
-            return;
-        }
-
-        await showApp(data.user);
-
-    } catch (error) {
-        console.error(error);
-        message.textContent =
-            "Ошибка JavaScript. Открой F12 → Console.";
-    }
-}
-
-
-async function logout() {
-    await supabaseClient.auth.signOut();
-
-    document.getElementById("auth").style.display = "block";
-    document.getElementById("app").style.display = "none";
-
-    document.getElementById("authMessage").textContent = "";
-    document.getElementById("homework").innerHTML = "";
-}
-
-
-// ===============================
-// ПОКАЗ ПРИЛОЖЕНИЯ
-// ===============================
-
-async function showApp(user) {
-    document.getElementById("auth").style.display = "none";
-    document.getElementById("app").style.display = "block";
-
-    document.getElementById("userEmail").textContent =
-        "Вы вошли как: " + user.email;
-
-    await loadHomeworkFromCloud(user.id);
-
-    showHomework();
-}
-
-
-// ===============================
-// ПРОВЕРКА АВТОРИЗАЦИИ
-// ===============================
-
-async function checkUser() {
-    try {
-        const { data, error } =
-            await supabaseClient.auth.getUser();
-
-        if (error) {
-            console.error(error);
-            return;
-        }
-
-        if (data.user) {
-            await showApp(data.user);
-        }
-
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-
-// ===============================
-// HOMEWORK — ОБЛАКО
-// ===============================
-
-async function loadHomeworkFromCloud(userId) {
-    try {
-        const { data, error } = await supabaseClient
-            .from("homework")
-            .select("*")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false });
-
-        if (error) {
-            console.error("Ошибка загрузки домашки:", error);
-            return;
-        }
-
-        // Если в облаке пока ничего нет,
-        // попробуем перенести старые данные
-        // из localStorage.
-
-        if (data.length === 0) {
-            await migrateOldHomework(userId);
-
-            const { data: newData, error: newError } =
-                await supabaseClient
-                    .from("homework")
-                    .select("*")
-                    .eq("user_id", userId)
-                    .order("created_at", {
-                        ascending: false
-                    });
-
-            if (newError) {
-                console.error(newError);
-                return;
-            }
-
-            setHomeworkData(newData || []);
-            return;
-        }
-
-        setHomeworkData(data);
-
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-
-function setHomeworkData(data) {
-    homeworkList = data.filter(item => !item.in_trash);
-    trashHomework = data.filter(item => item.in_trash);
-
-    // Локальная копия — как запасной вариант
-    localStorage.setItem(
-        "homeworkList",
-        JSON.stringify(homeworkList)
-    );
-
-    localStorage.setItem(
-        "trashHomework",
-        JSON.stringify(trashHomework)
-    );
-}
-
-
-// ===============================
-// ПЕРЕНОС СТАРОЙ ДОМАШКИ
-// ===============================
-
-async function migrateOldHomework(userId) {
-    const oldHomework =
-        JSON.parse(localStorage.getItem("homeworkList")) || [];
-
-    const oldTrash =
-        JSON.parse(localStorage.getItem("trashHomework")) || [];
-
-    const allOldHomework = [
-        ...oldHomework.map(item => ({
-            subject: item.subject,
-            task: item.task,
-            deadline: item.deadline || null,
-            completed: item.completed || false,
-            in_trash: false
-        })),
-
-        ...oldTrash.map(item => ({
-            subject: item.subject,
-            task: item.task,
-            deadline: item.deadline || null,
-            completed: item.completed || false,
-            in_trash: true
-        }))
-    ];
-
-    if (allOldHomework.length === 0) {
-        return;
-    }
-
-    const rows = allOldHomework.map(item => ({
-        user_id: userId,
-        subject: item.subject,
-        task: item.task,
-        deadline: item.deadline,
-        completed: item.completed,
-        in_trash: item.in_trash
-    }));
-
-    const { error } = await supabaseClient
-        .from("homework")
-        .insert(rows);
-
-    if (error) {
-        console.error(
-            "Ошибка переноса старой домашки:",
-            error
-        );
-    }
-}
-
-
-// ===============================
-// HOMEWORK
-// ===============================
+// ДОМАШКА
 
 function showHomework() {
-    const homework = document.getElementById("homework");
 
-    homework.innerHTML = `
-        <h2>📋 Домашка</h2>
+    let homework = document.getElementById("homework");
 
-        <button onclick="addHomework()">
-            ➕ Добавить домашку
-        </button>
-
-        <hr>
-
-        <div id="homeworkList"></div>
-    `;
+    // Если домашка уже открыта — закрываем
+    if (
+        homework.innerHTML !== "" &&
+        homework.innerHTML.includes("📋 Мои домашние задания")
+    ) {
+        homework.innerHTML = "";
+        return;
+    }
 
     showHomeworkList();
 }
 
 
-function showHomeworkList() {
-    const container =
-        document.getElementById("homeworkList");
+// ПОКАЗ ДОМАШКИ
 
-    if (!container) {
-        return;
-    }
+function showHomeworkList() {
+    let homework = document.getElementById("homework");
+
+    homework.innerHTML = `
+        <h2>📋 Мои домашние задания</h2>
+    `;
 
     if (homeworkList.length === 0) {
-        container.innerHTML =
-            "<p>Домашних заданий пока нет.</p>";
-        return;
+        homework.innerHTML += `
+            <p>Пока заданий нет.</p>
+        `;
+    } else {
+
+        for (let i = 0; i < homeworkList.length; i++) {
+
+            let item = homeworkList[i];
+
+            homework.innerHTML += `
+                <div class="homework-card ${item.completed ? "completed" : ""}">
+
+                    <h3>📚 Предмет</h3>
+                    <p>${item.subject}</p>
+
+                    <h3>📝 Что нужно сделать</h3>
+                    <p>${item.task}</p>
+
+                    <h3>📌 Статус</h3>
+                    <p>
+                        ${item.completed ? "✅ Выполнено" : "⏳ Не выполнено"}
+                    </p>
+                    ${item.deadline ? `
+    <h3>⏰ Дедлайн</h3>
+    <p>${formatDeadline(item.deadline)}</p>
+    <p>${getDeadlineStatus(item.deadline, item.completed)}</p>
+` : ""}
+
+                    <button
+                        class="delete-button"
+                        onclick="deleteHomework(${i})">
+                        🗑️ Удалить
+                    </button>
+
+                    <button
+                        class="complete-button"
+                        onclick="toggleHomework(${i})">
+                        ${item.completed ? "↩️ Не выполнено" : "✅ Выполнено"}
+                    </button>
+
+                </div>
+            `;
+        }
     }
 
-    container.innerHTML = homeworkList.map(item => `
-        <div class="homework-card ${item.completed ? "completed" : ""}">
+    homework.innerHTML += `
+        <br>
 
-            <h3>
-                ${escapeHtml(item.subject)}
-            </h3>
-
-            <p>
-                ${escapeHtml(item.task)}
-            </p>
-
-            ${
-                item.deadline
-                    ? `<p>📅 Срок: ${formatDeadline(item.deadline)}</p>`
-                    : ""
-            }
-
-            <button onclick="toggleHomework(${item.id})">
-                ${
-                    item.completed
-                        ? "↩️ Вернуть"
-                        : "✅ Выполнено"
-                }
-            </button>
-
-            <button onclick="deleteHomework(${item.id})">
-                🗑️ Удалить
-            </button>
-
-        </div>
-    `).join("");
+        <button onclick="openAddHomework()">
+            ➕ Добавить ещё
+        </button>
+    `;
 }
 
 
-// ===============================
-// ДОБАВИТЬ ДОМАШКУ
-// ===============================
+// ДОБАВЛЕНИЕ
 
-async function addHomework() {
-    const subject = prompt("Предмет:");
+function openAddHomework() {
 
-    if (!subject) {
-        return;
-    }
+    let homework = document.getElementById("homework");
 
-    const task = prompt("Что нужно сделать?");
+    homework.innerHTML = `
+        <h2>➕ Добавить домашку</h2>
 
-    if (!task) {
-        return;
-    }
+        <input id="subject" placeholder="Предмет">
 
-    const deadline =
-        prompt("Срок (например 2026-09-10), или оставь пустым:");
+        <br><br>
 
-    try {
-        const { data: userData, error: userError } =
-            await supabaseClient.auth.getUser();
+        <input id="task" placeholder="Что нужно сделать?">
 
-        if (userError || !userData.user) {
-            alert("Нужно войти в аккаунт.");
-            return;
-        }
+        <br><br>
 
-        const { data, error } =
-            await supabaseClient
-                .from("homework")
-                .insert({
-                    user_id: userData.user.id,
-                    subject: subject,
-                    task: task,
-                    deadline: deadline || null,
-                    completed: false,
-                    in_trash: false
-                })
-                .select("*")
-                .single();
+        <label>⏰ Дедлайн:</label>
+        <br><br>
 
-        if (error) {
-            console.error(error);
-            alert("Не удалось добавить домашку.");
-            return;
-        }
+        <input id="deadline" type="datetime-local">
 
-        homeworkList.unshift(data);
+        <br><br>
 
-        saveLocalHomeworkBackup();
-        showHomeworkList();
+        <button onclick="saveHomework()">
+            💾 Сохранить
+        </button>
 
-    } catch (error) {
-        console.error(error);
-        alert("Произошла ошибка.");
-    }
+        <button onclick="showHomeworkList()">
+            ❌ Отмена
+        </button>
+    `;
 }
 
 
-// ===============================
-// ВЫПОЛНЕНО / НЕ ВЫПОЛНЕНО
-// ===============================
+// СОХРАНЕНИЕ ДОМАШКИ
 
-async function toggleHomework(id) {
-    const item = homeworkList.find(
-        homework => homework.id === id
-    );
+function saveHomework() {
+
+    let subject = document.getElementById("subject").value;
+    let task = document.getElementById("task").value;
+    let deadline = document.getElementById("deadline").value;
+
+    if (!subject || !task) {
+        alert("Заполни предмет и задание.");
+        return;
+    }
+
+    homeworkList.push({
+        subject: subject,
+        task: task,
+        deadline: deadline,
+        completed: false
+    });
+
+    saveData();
+
+    showHomeworkList();
+}
+
+
+// УДАЛЕНИЕ
+
+function deleteHomework(index) {
+
+    let item = homeworkList[index];
 
     if (!item) {
         return;
     }
 
-    try {
-        const { data: userData } =
-            await supabaseClient.auth.getUser();
+    trashHomework.push(item);
 
-        if (!userData.user) {
-            return;
-        }
+    homeworkList.splice(index, 1);
 
-        const newStatus = !item.completed;
+    saveData();
 
-        const { error } =
-            await supabaseClient
-                .from("homework")
-                .update({
-                    completed: newStatus
-                })
-                .eq("id", id)
-                .eq("user_id", userData.user.id);
-
-        if (error) {
-            console.error(error);
-            return;
-        }
-
-        item.completed = newStatus;
-
-        saveLocalHomeworkBackup();
-        showHomeworkList();
-
-    } catch (error) {
-        console.error(error);
-    }
+    showHomeworkList();
 }
 
 
-// ===============================
-// УДАЛЕНИЕ
-// ===============================
+// ВЫПОЛНЕНИЕ
 
-async function deleteHomework(id) {
-    try {
-        const { data: userData } =
-            await supabaseClient.auth.getUser();
+function toggleHomework(index) {
 
-        if (!userData.user) {
-            return;
-        }
+    homeworkList[index].completed =
+        !homeworkList[index].completed;
 
-        const { error } =
-            await supabaseClient
-                .from("homework")
-                .update({
-                    in_trash: true
-                })
-                .eq("id", id)
-                .eq("user_id", userData.user.id);
+    saveData();
 
-        if (error) {
-            console.error(error);
-            return;
-        }
-
-        const itemIndex = homeworkList.findIndex(
-            item => item.id === id
-        );
-
-        if (itemIndex !== -1) {
-            const [item] =
-                homeworkList.splice(itemIndex, 1);
-
-            item.in_trash = true;
-            trashHomework.unshift(item);
-        }
-
-        saveLocalHomeworkBackup();
-        showHomeworkList();
-
-    } catch (error) {
-        console.error(error);
-    }
+    showHomeworkList();
 }
 
 
-// ===============================
 // КОРЗИНА
-// ===============================
+
+// ====================
+// КОРЗИНА
+// ====================
 
 function showTrash() {
-    const homework =
-        document.getElementById("homework");
+
+    let homework = document.getElementById("homework");
+
+    // Если корзина уже открыта — закрываем её
+    if (
+        homework.innerHTML !== "" &&
+        homework.innerHTML.includes("🗑️ Корзина")
+    ) {
+        homework.innerHTML = "";
+        return;
+    }
+
+    renderTrash();
+}
+
+
+// ====================
+// ОБНОВЛЕНИЕ КОРЗИНЫ
+// ====================
+
+function renderTrash() {
+
+    let homework = document.getElementById("homework");
 
     homework.innerHTML = `
-        <h2>🗑️ Корзина домашки</h2>
+        <h2>🗑️ Корзина</h2>
 
-        <button onclick="showHomework()">
-            ← Назад
-        </button>
-
-        <button onclick="clearHomeworkTrash()">
-            🗑️ Очистить корзину
-        </button>
-
-        <hr>
-
-        <div id="trashList"></div>
+        <h3>📋 Домашка</h3>
     `;
 
-    showTrashList();
-}
-
-
-function showTrashList() {
-    const container =
-        document.getElementById("trashList");
-
-    if (!container) {
-        return;
-    }
-
     if (trashHomework.length === 0) {
-        container.innerHTML =
-            "<p>Корзина пуста.</p>";
-        return;
+
+        homework.innerHTML += `
+            <p>Домашка: корзина пуста.</p>
+        `;
+
+    } else {
+
+        for (let i = 0; i < trashHomework.length; i++) {
+
+            let item = trashHomework[i];
+
+            homework.innerHTML += `
+                <div class="homework-card">
+
+                    <b>Предмет</b>
+                    <p>${item.subject}</p>
+
+                    <b>Что нужно сделать</b>
+                    <p>${item.task}</p>
+
+                    <button onclick="restoreHomework(${i})">
+                        ↩️ Восстановить
+                    </button>
+
+                </div>
+            `;
+        }
+
+        homework.innerHTML += `
+            <button onclick="clearHomeworkTrash()">
+                🧹 Очистить домашку
+            </button>
+        `;
     }
 
-    container.innerHTML = trashHomework.map(item => `
-        <div class="homework-card">
+    homework.innerHTML += `
+        <hr>
 
-            <h3>
-                ${escapeHtml(item.subject)}
-            </h3>
+        <h3>📚 Уроки</h3>
+    `;
 
-            <p>
-                ${escapeHtml(item.task)}
-            </p>
+    if (trashLessons.length === 0) {
 
-            <button onclick="restoreHomework(${item.id})">
-                ♻️ Восстановить
+        homework.innerHTML += `
+            <p>Уроки: корзина пуста.</p>
+        `;
+
+    } else {
+
+        for (let i = 0; i < trashLessons.length; i++) {
+
+            let item = trashLessons[i];
+
+            homework.innerHTML += `
+                <div class="homework-card">
+
+                    <b>День</b>
+                    <p>${item.day}</p>
+
+                    <b>Урок</b>
+                    <p>
+                        ${item.lesson.number}.
+                        ${lessonTimes[item.lesson.number - 1]}
+                        — ${item.lesson.lesson}
+                    </p>
+
+                    <button onclick="restoreLesson(${i})">
+                        ↩️ Восстановить
+                    </button>
+
+                </div>
+            `;
+        }
+
+        homework.innerHTML += `
+            <button onclick="clearLessonTrash()">
+                🧹 Очистить уроки
             </button>
+        `;
+    }
+        homework.innerHTML += `
+        <hr>
 
-        </div>
-    `).join("");
+        <h3>📝 Экзамены</h3>
+    `;
+
+    if (trashExams.length === 0) {
+
+        homework.innerHTML += `
+            <p>Экзамены: корзина пуста.</p>
+        `;
+
+    } else {
+
+        for (let i = 0; i < trashExams.length; i++) {
+
+            let exam = trashExams[i];
+
+            homework.innerHTML += `
+                <div class="homework-card">
+
+                    <b>Предмет</b>
+                    <p>${exam.subject}</p>
+
+                    <b>Дата экзамена</b>
+                    <p>${formatExamDate(exam.date)}</p>
+
+                    <button onclick="restoreExam(${i})">
+                        ↩️ Восстановить
+                    </button>
+
+                </div>
+            `;
+        }
+
+        homework.innerHTML += `
+            <button onclick="clearExamTrash()">
+                🧹 Очистить экзамены
+            </button>
+        `;
+    }
 }
 
 
-// ===============================
 // ВОССТАНОВЛЕНИЕ
-// ===============================
 
-async function restoreHomework(id) {
-    try {
-        const { data: userData } =
-            await supabaseClient.auth.getUser();
+function restoreHomework(index) {
 
-        if (!userData.user) {
-            return;
-        }
+    let item = trashHomework[index];
 
-        const { error } =
-            await supabaseClient
-                .from("homework")
-                .update({
-                    in_trash: false
-                })
-                .eq("id", id)
-                .eq("user_id", userData.user.id);
+    if (!item) {
+        return;
+    }
 
-        if (error) {
-            console.error(error);
-            return;
-        }
+    homeworkList.push(item);
 
-        const index = trashHomework.findIndex(
-            item => item.id === id
+    trashHomework.splice(index, 1);
+
+    saveData();
+
+    renderTrash();
+}
+function restoreLesson(index) {
+
+    let item = trashLessons[index];
+
+    if (!item) {
+        return;
+    }
+
+    let alreadyExists = schedule[item.day].some(
+        lesson => lesson.number === item.lesson.number
+    );
+
+    if (alreadyExists) {
+
+        alert(
+            "Нельзя восстановить урок №" +
+            item.lesson.number +
+            ", потому что это время уже занято в " +
+            item.day + "."
         );
 
-        if (index !== -1) {
-            const [item] =
-                trashHomework.splice(index, 1);
-
-            item.in_trash = false;
-            homeworkList.unshift(item);
-        }
-
-        saveLocalHomeworkBackup();
-        showTrashList();
-
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-
-// ===============================
-// ОЧИСТИТЬ КОРЗИНУ
-// ===============================
-
-async function clearHomeworkTrash() {
-    if (trashHomework.length === 0) {
         return;
     }
 
-    const confirmDelete =
-        confirm("Удалить домашку из корзины навсегда?");
+    schedule[item.day].push(item.lesson);
 
-    if (!confirmDelete) {
-        return;
-    }
+    schedule[item.day].sort(
+        (a, b) => a.number - b.number
+    );
 
-    try {
-        const { data: userData } =
-            await supabaseClient.auth.getUser();
+    trashLessons.splice(index, 1);
 
-        if (!userData.user) {
-            return;
-        }
+    saveSchedule();
+    saveData();
 
-        const { error } =
-            await supabaseClient
-                .from("homework")
-                .delete()
-                .eq("user_id", userData.user.id)
-                .eq("in_trash", true);
-
-        if (error) {
-            console.error(error);
-            return;
-        }
-
-        trashHomework = [];
-
-        saveLocalHomeworkBackup();
-        showTrashList();
-
-    } catch (error) {
-        console.error(error);
-    }
+    // Корзина тоже остаётся открытой
+   renderTrash();
 }
 
 
-// ===============================
+
+
+
+// ====================
 // РАСПИСАНИЕ
-// ===============================
+// ====================
 
+let schedule = JSON.parse(localStorage.getItem("schedule")) || {
+    "Понедельник": [],
+    "Вторник": [],
+    "Среда": [],
+    "Четверг": [],
+    "Пятница": []
+};
+
+
+// СОХРАНЕНИЕ РАСПИСАНИЯ
+
+function saveSchedule() {
+    localStorage.setItem("schedule", JSON.stringify(schedule));
+}
+
+
+// ПОКАЗ / ЗАКРЫТИЕ РАСПИСАНИЯ
+
+// ====================
+// ВРЕМЯ УРОКОВ
+// ====================
+// ====================
+// ФОРМАТ ДЕДЛАЙНА
+// ====================
+
+function formatDeadline(deadline) {
+
+    let date = new Date(deadline);
+
+    if (isNaN(date.getTime())) {
+        return "Не указан";
+    }
+
+    return date.toLocaleString("ru-RU", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+function getDeadlineStatus(deadline, completed) {
+
+    if (!deadline) {
+        return "";
+    }
+
+    if (completed) {
+        return "✅ Задание выполнено";
+    }
+
+    let now = new Date();
+    let date = new Date(deadline);
+
+    let difference = date - now;
+
+    if (difference < 0) {
+        return "🔴 Дедлайн прошёл";
+    }
+
+    let minutes = Math.floor(difference / 60000);
+    let hours = Math.floor(minutes / 60);
+    let days = Math.floor(hours / 24);
+
+    if (days > 1) {
+        return `🟢 Осталось ${days} дн.`;
+    }
+
+    if (days === 1) {
+        return "🟡 Остался 1 день";
+    }
+
+    if (hours > 1) {
+        return `🟠 Осталось ${hours} ч.`;
+    }
+
+    if (hours === 1) {
+        return "🔴 Остался 1 час";
+    }
+
+    return `🔴 Осталось ${minutes} мин.`;
+}
 const lessonTimes = [
     "8:30 - 9:15",
     "9:15 - 10:00",
@@ -670,248 +516,570 @@ const lessonTimes = [
 ];
 
 
+// ====================
+// ПОКАЗ РАСПИСАНИЯ
+// ====================
+
 function showSchedule() {
-    const homework =
-        document.getElementById("homework");
 
-    homework.innerHTML = `
-        <h2>📅 Расписание</h2>
+    let homework = document.getElementById("homework");
 
-        <button onclick="showHomework()">
-            ← Назад
-        </button>
-
-        <hr>
-
-        <div id="scheduleContainer"></div>
-    `;
-
-    renderSchedule();
-}
-
-
-function renderSchedule() {
-    const container =
-        document.getElementById("scheduleContainer");
-
-    if (!container) {
+    // Если расписание уже открыто — закрываем
+    if (
+        homework.innerHTML !== "" &&
+        homework.innerHTML.includes("📅 Моё расписание")
+    ) {
+        homework.innerHTML = "";
         return;
     }
 
-    const days = [
-        "Понедельник",
-        "Вторник",
-        "Среда",
-        "Четверг",
-        "Пятница"
-    ];
+    renderSchedule();
+}
+function renderSchedule() {
 
-    container.innerHTML = "";
+    let homework = document.getElementById("homework");
 
-    days.forEach(day => {
-        if (!schedule[day]) {
-            schedule[day] = [];
+    homework.innerHTML = `
+        <h2>📅 Моё расписание</h2>
+    `;
+
+    for (let day in schedule) {
+
+        homework.innerHTML += `
+            <div class="homework-card">
+
+                <h3>📚 ${day}</h3>
+        `;
+
+        if (schedule[day].length === 0) {
+
+            homework.innerHTML += `
+                <p>Уроков пока нет.</p>
+            `;
+
+        } else {
+
+            for (let i = 0; i < schedule[day].length; i++) {
+
+                let item = schedule[day][i];
+
+                homework.innerHTML += `
+                    <p>
+                        <b>
+                            ${item.number}. 
+                            ${lessonTimes[item.number - 1]}
+                            — ${item.lesson}
+                        </b>
+
+                        <button
+                            class="delete-button"
+                            onclick="deleteLesson('${day}', ${i})">
+                            🗑️ Удалить
+                        </button>
+                    </p>
+                `;
+            }
         }
 
-        container.innerHTML += `
-            <div class="day">
-
-                <h2>${day}</h2>
-
-                ${
-                    schedule[day].length === 0
-                        ? "<p>Уроков нет.</p>"
-                        : schedule[day]
-                            .sort(
-                                (a, b) =>
-                                    a.number - b.number
-                            )
-                            .map(lesson => `
-                                <div class="lesson">
-
-                                    <strong>
-                                        Урок ${lesson.number}
-                                    </strong>
-
-                                    <span>
-                                        ${lessonTimes[lesson.number - 1]}
-                                    </span>
-
-                                    <p>
-                                        ${escapeHtml(lesson.name)}
-                                    </p>
-
-                                    <button
-                                        onclick="deleteLesson('${day}', ${lesson.number})"
-                                    >
-                                        🗑️
-                                    </button>
-
-                                </div>
-                            `)
-                            .join("")
-                }
-
+        homework.innerHTML += `
                 <button onclick="addLesson('${day}')">
                     ➕ Добавить урок
                 </button>
 
             </div>
-
-            <hr>
         `;
-    });
-
-    localStorage.setItem(
-        "schedule",
-        JSON.stringify(schedule)
-    );
+    }
 }
 
+      
+    
 
-// ===============================
-// ДОБАВИТЬ УРОК
-// ===============================
+
+
+// ====================
+// ДОБАВЛЕНИЕ УРОКА
+// ====================
 
 function addLesson(day) {
-    const numberText =
-        prompt("Номер урока от 1 до 8:");
 
-    const number = Number(numberText);
+    let number = prompt(
+        "Какой номер урока добавить?\nВведи число от 1 до 8."
+    );
+
+    number = Number(number);
 
     if (
         !Number.isInteger(number) ||
         number < 1 ||
         number > 8
     ) {
-        alert("Номер должен быть от 1 до 8.");
+        alert("Нужно ввести номер от 1 до 8.");
         return;
     }
 
-    if (!schedule[day]) {
-        schedule[day] = [];
-    }
-
-    const alreadyExists =
-        schedule[day].some(
-            lesson => lesson.number === number
-        );
+    // Проверяем, нет ли уже такого номера в этом дне
+    let alreadyExists = schedule[day].some(
+        item => item.number === number
+    );
 
     if (alreadyExists) {
         alert(
-            "В этот день урок с таким номером уже есть."
+            "Урок №" + number +
+            " уже добавлен в " + day + "."
         );
         return;
     }
 
-    const name =
-        prompt("Название предмета:");
+    let lesson = prompt(
+        "Какой предмет будет на этом уроке?"
+    );
 
-    if (!name) {
+    if (!lesson) {
         return;
     }
 
     schedule[day].push({
         number: number,
-        name: name
+        lesson: lesson
     });
 
+    // Сортировка по номеру урока
+    schedule[day].sort(
+        (a, b) => a.number - b.number
+    );
+
+    saveSchedule();
+
+    // НЕ закрываем расписание
     renderSchedule();
 }
 
 
-// ===============================
-// УДАЛИТЬ УРОК
-// ===============================
+// ====================
+// УДАЛЕНИЕ УРОКА
+// ====================
 
-function deleteLesson(day, number) {
-    if (!schedule[day]) {
+function deleteLesson(day, index) {
+
+    let item = schedule[day][index];
+
+    if (!item) {
         return;
     }
 
-    const index =
-        schedule[day].findIndex(
-            lesson => lesson.number === number
+    trashLessons.push({
+        day: day,
+        lesson: item
+    });
+
+    schedule[day].splice(index, 1);
+
+    saveSchedule();
+    saveData();
+
+    // НЕ закрываем расписание
+    renderSchedule();
+}
+function clearHomeworkTrash() {
+
+    if (trashHomework.length === 0) {
+        return;
+    }
+
+    let confirmClear = confirm(
+        "Ты точно хочешь удалить всю удалённую домашку?"
+    );
+
+    if (!confirmClear) {
+        return;
+    }
+
+    trashHomework = [];
+
+    saveData();
+
+    renderTrash();
+}
+
+
+function clearLessonTrash() {
+
+    if (trashLessons.length === 0) {
+        return;
+    }
+
+    let confirmClear = confirm(
+        "Ты точно хочешь удалить все удалённые уроки?"
+    );
+
+    if (!confirmClear) {
+        return;
+    }
+
+    trashLessons = [];
+
+    saveData();
+
+    renderTrash();
+}
+// ====================
+// ЭКЗАМЕНЫ
+// ====================
+
+let exams = JSON.parse(localStorage.getItem("exams")) || [];
+let trashExams = JSON.parse(localStorage.getItem("trashExams")) || [];
+
+
+// ====================
+// СОХРАНЕНИЕ ЭКЗАМЕНОВ
+// ====================
+
+function saveExams() {
+
+    localStorage.setItem(
+        "exams",
+        JSON.stringify(exams)
+    );
+
+    localStorage.setItem(
+        "trashExams",
+        JSON.stringify(trashExams)
+    );
+}
+
+
+// ====================
+// ПОКАЗ ЭКЗАМЕНОВ
+// ====================
+
+function showExams() {
+
+    let homework = document.getElementById("homework");
+
+    if (
+        homework.innerHTML !== "" &&
+        homework.innerHTML.includes("📝 Мои экзамены")
+    ) {
+        homework.innerHTML = "";
+        return;
+    }
+
+    renderExams();
+}
+
+
+// ====================
+// СПИСОК ЭКЗАМЕНОВ
+// ====================
+
+function renderExams() {
+
+    let homework = document.getElementById("homework");
+
+    homework.innerHTML = `
+        <h2>📝 Мои экзамены</h2>
+    `;
+
+    if (exams.length === 0) {
+
+        homework.innerHTML += `
+            <p>Экзаменов пока нет.</p>
+        `;
+
+    } else {
+
+        exams.sort(
+            (a, b) =>
+                new Date(a.date) - new Date(b.date)
         );
 
-    if (index === -1) {
+        for (let i = 0; i < exams.length; i++) {
+
+            let exam = exams[i];
+
+            homework.innerHTML += `
+                <div class="homework-card">
+
+                    <h3>📚 ${exam.subject}</h3>
+
+                    <p>
+                        📅 ${formatExamDate(exam.date)}
+                    </p>
+
+                    <p>
+                        ${getExamStatus(exam.date)}
+                    </p>
+                    <p>
+    📌 Статус:
+    ${exam.completed ? "✅ Экзамен выполнен" : "⏳ Не сдан"}
+</p>
+
+                    <button
+                        class="delete-button"
+                        onclick="deleteExam(${i})">
+                        🗑️ Удалить
+                    </button>
+                    <button
+    class="complete-button"
+    onclick="toggleExam(${i})">
+    ${exam.completed ? "↩️ Не сдан" : "✅ Экзамен выполнен"}
+</button>
+
+                </div>
+            `;
+        }
+    }
+
+    homework.innerHTML += `
+        <br>
+
+        <button onclick="openAddExam()">
+            ➕ Добавить экзамен
+        </button>
+    `;
+}
+
+
+// ====================
+// ДОБАВЛЕНИЕ ЭКЗАМЕНА
+// ====================
+
+function openAddExam() {
+
+    let homework = document.getElementById("homework");
+
+    homework.innerHTML = `
+        <h2>➕ Добавить экзамен</h2>
+
+        <input
+            id="examSubject"
+            placeholder="Предмет"
+        >
+
+        <br><br>
+
+        <label>📅 Дата экзамена:</label>
+
+        <br><br>
+
+        <input
+            id="examDate"
+            type="date"
+        >
+
+        <br><br>
+
+        <button onclick="saveExam()">
+            💾 Сохранить
+        </button>
+
+        <button onclick="renderExams()">
+            ❌ Отмена
+        </button>
+    `;
+}
+
+
+// ====================
+// СОХРАНЕНИЕ ЭКЗАМЕНА
+// ====================
+
+function saveExam() {
+
+    let subject =
+        document.getElementById("examSubject").value;
+
+    let date =
+        document.getElementById("examDate").value;
+
+    if (!subject || !date) {
+
+        alert(
+            "Заполни предмет и дату экзамена."
+        );
+
         return;
     }
 
-    const [lesson] =
-        schedule[day].splice(index, 1);
+   exams.push({
+    subject: subject,
+    date: date,
+    completed: false
+});
 
-    if (!trashLessons[day]) {
-        trashLessons[day] = [];
+    saveExams();
+
+    renderExams();
+}
+
+
+// ====================
+// УДАЛЕНИЕ ЭКЗАМЕНА
+// ====================
+
+function deleteExam(index) {
+
+    let exam = exams[index];
+
+    if (!exam) {
+        return;
     }
 
-    trashLessons[day].push({
-        number: lesson.number,
-        name: lesson.name
+    trashExams.push(exam);
+
+    exams.splice(index, 1);
+
+    saveExams();
+
+    renderExams();
+}
+
+
+// ====================
+// ФОРМАТ ДАТЫ ЭКЗАМЕНА
+// ====================
+
+function formatExamDate(date) {
+
+    let examDate = new Date(date + "T00:00:00");
+
+    return examDate.toLocaleDateString(
+        "ru-RU",
+        {
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+        }
+    );
+}
+
+
+// ====================
+// СТАТУС ЭКЗАМЕНА
+// ====================
+
+function getExamStatus(date) {
+
+    let today = new Date();
+
+    today.setHours(0, 0, 0, 0);
+
+    let examDate =
+        new Date(date + "T00:00:00");
+
+    let difference =
+        examDate - today;
+
+    let days =
+        Math.round(
+            difference / (1000 * 60 * 60 * 24)
+        );
+
+    if (days < 0) {
+
+        return "⚫ Экзамен уже прошёл";
+
+    }
+
+    if (days === 0) {
+
+        return "🔴 Экзамен сегодня!";
+
+    }
+
+    if (days === 1) {
+
+        return "🟡 Экзамен завтра!";
+
+    }
+
+    return `🟢 Осталось ${days} дн.`;
+}
+// ====================
+// ВОССТАНОВЛЕНИЕ ЭКЗАМЕНА
+// ====================
+
+function restoreExam(index) {
+
+    let exam = trashExams[index];
+
+    if (!exam) {
+        return;
+    }
+
+    exams.push(exam);
+
+    trashExams.splice(index, 1);
+
+    saveExams();
+
+    renderTrash();
+}
+
+
+// ====================
+// ОЧИСТКА КОРЗИНЫ ЭКЗАМЕНОВ
+// ====================
+
+function clearExamTrash() {
+
+    if (trashExams.length === 0) {
+        return;
+    }
+
+    let confirmClear = confirm(
+        "Ты точно хочешь удалить все удалённые экзамены?"
+    );
+
+    if (!confirmClear) {
+        return;
+    }
+
+    trashExams = [];
+
+    saveExams();
+
+    renderTrash();
+}
+// ====================
+// ВЫПОЛНЕНИЕ ЭКЗАМЕНА
+// ====================
+
+function toggleExam(index) {
+
+    exams[index].completed =
+        !exams[index].completed;
+
+    saveExams();
+
+    renderExams();
+}
+// ====================
+// PUSH-УВЕДОМЛЕНИЯ
+// ====================
+
+if ("serviceWorker" in navigator) {
+
+    window.addEventListener("load", function() {
+
+        navigator.serviceWorker
+            .register("sw.js")
+            .then(function(registration) {
+
+                console.log(
+                    "✅ Service Worker подключён:",
+                    registration.scope
+                );
+
+            })
+            .catch(function(error) {
+
+                console.error(
+                    "❌ Ошибка Service Worker:",
+                    error
+                );
+
+            });
+
     });
-
-    localStorage.setItem(
-        "schedule",
-        JSON.stringify(schedule)
-    );
-
-    localStorage.setItem(
-        "trashLessons",
-        JSON.stringify(trashLessons)
-    );
-
-    renderSchedule();
 }
-
-
-// ===============================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ===============================
-
-function saveLocalHomeworkBackup() {
-    localStorage.setItem(
-        "homeworkList",
-        JSON.stringify(homeworkList)
-    );
-
-    localStorage.setItem(
-        "trashHomework",
-        JSON.stringify(trashHomework)
-    );
-}
-
-
-function formatDeadline(dateString) {
-    if (!dateString) {
-        return "";
-    }
-
-    const date = new Date(dateString);
-
-    if (Number.isNaN(date.getTime())) {
-        return dateString;
-    }
-
-    return date.toLocaleDateString("ru-RU");
-}
-
-
-function escapeHtml(text) {
-    if (text === null || text === undefined) {
-        return "";
-    }
-
-    return String(text)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-}
-
-
-// ===============================
-// ЗАПУСК
-// ===============================
-
-checkUser();

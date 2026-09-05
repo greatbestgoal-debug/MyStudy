@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Мой школьный помощник</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <h1>📚 Мой школьный помощник</h1>
+
+    <!-- АККАУНТ -->
+
+    <div id="auth">
+
+        <h2>👤 Вход в аккаунт</h2>
+
+        <input
+            id="email"
+            type="email"
+            placeholder="Email"
+        >
+
+        <br><br>
+
+        <input
+            id="password"
+            type="password"
+            placeholder="Пароль"
+        >
+
+        <br><br>
+
+        <button onclick="login()">
+            🔐 Войти
+        </button>
+
+        <button onclick="register()">
+            📝 Создать аккаунт
+        </button>
+
+        <p id="authMessage"></p>
+
+    </div>
+
+
+    <!-- ПРИЛОЖЕНИЕ -->
+
+    <div id="app" style="display: none;">
+
+        <p>Школьные работы, расписание, домашки и ещё...</p>
+
+        <p id="userEmail"></p>
+
+        <button onclick="showHomework()">📋 Домашка</button>
+        <button onclick="showSchedule()">📅 Расписание</button>
+        <button>🧠 Тренажёр</button>
+        <button onclick="showTrash()">🗑️ Корзина</button>
+
+        <button onclick="logout()">
+            🚪 Выйти
+        </button>
+
+        <div id="homework"></div>
+
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="script.js"></script>
+
+</body>
+</html>
